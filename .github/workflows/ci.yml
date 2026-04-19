@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  smoke:
+    name: Smoke test (node require + syntax check)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install deps
+        run: npm install --no-audit --no-fund
+
+      - name: Syntax check (require all source files)
+        run: |
+          node -e "
+            const fs = require('fs');
+            const path = require('path');
+            const files = [];
+            function walk(d) {
+              for (const f of fs.readdirSync(d, { withFileTypes: true })) {
+                if (f.name === 'node_modules' || f.name.startsWith('.')) continue;
+                const full = path.join(d, f.name);
+                if (f.isDirectory()) walk(full);
+                else if (f.name.endsWith('.js')) files.push(full);
+              }
+            }
+            walk(path.join(process.cwd(), 'src'));
+            let ok = true;
+            for (const f of files) {
+              try {
+                require(f);
+                console.log('  ✓', f);
+              } catch (err) {
+                // config.js pode falhar por falta de API_TOKEN — é esperado
+                if (f.endsWith('config.js') && /API_TOKEN/.test(err.message)) {
+                  console.log('  ✓', f, '(requires API_TOKEN at runtime — ok)');
+                  continue;
+                }
+                console.error('  ✗', f);
+                console.error('   ', err.message);
+                ok = false;
+              }
+            }
+            process.exit(ok ? 0 : 1);
+          "
+        env:
+          API_TOKEN: ci-test-token-long-enough-to-pass-validation-xxxxxxx
+
+      - name: Verify scripts are executable
+        run: |
+          test -x scripts/setup-server.sh || (echo "setup-server.sh not executable" && exit 1)
+          test -x scripts/bootstrap.sh || (echo "bootstrap.sh not executable" && exit 1)
+
+      - name: Verify docs
+        run: |
+          test -f README.md && wc -l README.md
+          test -f API.md && wc -l API.md
+          test -f .claude/CLAUDE.md && wc -l .claude/CLAUDE.md
