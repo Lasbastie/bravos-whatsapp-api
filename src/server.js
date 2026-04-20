@@ -6,6 +6,35 @@ const config = require('./config');
 const log = require('./logger');
 const waClient = require('./client');
 
+// Webhook forwarder - envia mensagens recebidas/enviadas para WEBHOOK_URL
+const WEBHOOK_URL = process.env.WEBHOOK_URL;
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || '';
+if (WEBHOOK_URL) {
+  log.info(`[webhook] configurado para: ${WEBHOOK_URL}`);
+  const postWebhook = async (type, data) => {
+    try {
+      const res = await fetch(WEBHOOK_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Webhook-Source': 'imperador',
+          'X-Webhook-Secret': WEBHOOK_SECRET
+        },
+        body: JSON.stringify({ type, data, clientId: config.CLIENT_ID, timestamp: Date.now() })
+      });
+      if (!res.ok) log.warn(`[webhook] ${type} falhou: ${res.status}`);
+    } catch (e) {
+      log.warn(`[webhook] ${type} erro: ${e.message}`);
+    }
+  };
+  waClient.on('message_in', (msg) => postWebhook('message_in', msg));
+  waClient.on('message_out', (msg) => postWebhook('message_out', msg));
+  waClient.on('ready', () => postWebhook('ready', { ok: true }));
+  waClient.on('disconnected', (reason) => postWebhook('disconnected', { reason }));
+} else {
+  log.info('[webhook] WEBHOOK_URL nao configurada - webhook desativado');
+}
+
 // Routes
 const qrRoutes = require('./routes/qr');
 const sendRoutes = require('./routes/send');
